@@ -13,13 +13,14 @@ import pylsl
 import numpy as np
 import torch
 
+torch.rand(1)
 
 plot_duration = 15  # how many seconds of data to show
-update_interval = 60  # ms between screen updates
+update_interval = 90  # ms between screen updates
 pull_interval = 90  # ms between each pull operation
 control_interval = 100  # ms between sends of each control signal
 win_len_sec = 0.750  # Length of processing window (750 ms)
-blanking_ms = 500  # Length of waiting period after change in stim
+blanking_ms = 1200  # ms of waiting period after change in stim
 
 
 class DataInletPlaceHolder:
@@ -211,7 +212,7 @@ class ProcessorAndOutlet:
         plt_on.addItem(self.score_curve_on)
         plt_on.addItem(self.out_curve_on)
 
-    def set_tresh_on(self, thresh):
+    def set_thresh_on(self, thresh):
         self.thresh_on = thresh
 
     def set_thresh_off(self, thresh):
@@ -253,9 +254,10 @@ class ProcessorAndOutlet:
         else:
             model = self.model_off
 
-        x = torch.Tensor(to_process).unsqueeze(0)
-        out_l = model(x).squeeze()
-        out = torch.nn.functional.softmax(out_l, dim=0).squeeze()[1].item()
+        with torch.no_grad():
+            x = torch.Tensor(to_process).unsqueeze(0)
+            out_l = model(x).squeeze()
+            out = torch.nn.functional.softmax(out_l, dim=0).squeeze()[1].item()
         # print(out)
 
         # Send to stream:
@@ -271,8 +273,10 @@ class ProcessorAndOutlet:
         # Update plots:
         if self.stim_is_on:
             score_curve, out_curve = self.score_curve_on, self.out_curve_on
+            other_score, other_out = self.score_curve_off, self.out_curve_off
         else:
             score_curve, out_curve = self.score_curve_off, self.out_curve_off
+            other_score, other_out = self.score_curve_on, self.out_curve_on
         # Score Curves:
         t_out, y_score = score_curve.getData()
         old_offset = t_out.searchsorted(plot_time)
@@ -280,15 +284,25 @@ class ProcessorAndOutlet:
             np.hstack((t_out[old_offset:], np.array(pylsl.local_clock()))),
             np.hstack((y_score[old_offset:], np.array(out))),
         )
-        score_curve.setData(t_out, y_score)
+        score_curve.setData(t_out, y_score, connect="finite")
 
         # Out Curve:
         _, y_out_cat = out_curve.getData()
         y_out_cat = np.hstack((y_out_cat[old_offset:], np.array((self.out_cat))))
-        out_curve.setData(
-            t_out, y_out_cat,
-        )
+        out_curve.setData(t_out, y_out_cat, connect="finite")
         out_curve.setPen((250, 0, 0))
+
+        # Other Curves:
+        _, other_y = other_score.getData()
+        _, other_cat = other_out.getData()
+
+        other_y = np.hstack((other_y[old_offset:], np.array(np.nan)))
+        other_score.setData(t_out, other_y, connect="finite")
+
+        other_cat = np.hstack((other_cat[old_offset:], np.array(np.nan)))
+        other_out.setData(t_out, other_cat, connect="finite")
+        other_out.setPen((250, 0, 0))
+
         self.stim_is_on = bool(self.out_cat)
 
 
