@@ -1,14 +1,15 @@
 import sys
 from PyQt5 import QtWidgets, uic, QtCore
 from PyQt5.QtGui import QDoubleValidator
-from toggle_stim_ui import Ui_MainWindow
 
 from win_control import get_coords, clicks, clicks_alt
 
 
 import os
+from pathlib import Path
 
 clear = lambda: os.system("cls")
+Ui_MainWindow, _ = uic.loadUiType(Path("ui_files") / "toggle_stim.ui")
 
 
 class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
@@ -52,4 +53,3 @@ if __name__ == "__main__":
     main.show()
 
     sys.exit(app.exec_())
-

@@ -5,9 +5,9 @@ from pylsl import StreamInfo, StreamOutlet, local_clock
 
 def main():
     fs = 4096.0
-    name = "dd"
+    name = "Test Stream"
     type = "LFPs"
-    n_chan = 11
+    n_chan = 14
 
     chunk_size = 32
 
@@ -22,7 +22,9 @@ def main():
     while True:
         required_samples = chunk_size
 
-        samples = [np.random.rand(required_samples).tolist() for _ in range(n_chan)]
+        samples = [
+            (np.random.rand(required_samples) + 10_000).tolist() for _ in range(n_chan)
+        ]
 
         outlet.push_chunk(samples)
         sent_chunks += 1

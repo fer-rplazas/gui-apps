@@ -1,36 +1,44 @@
+import math
 import sys
 from pathlib import Path
-import math
-import pyqtgraph as pg
-from pyqtgraph import PlotItem, GraphicsLayoutWidget
-
-from PyQt5 import QtWidgets, uic, QtCore
-from PyQt5.QtGui import QDoubleValidator
-from live_streaming_ui import Ui_MainWindow
-
 from typing import Optional
-import pylsl
+
 import numpy as np
+import pylsl
+import pyqtgraph as pg
 import torch
+from PyQt5 import QtCore, QtWidgets, uic
+from PyQt5.QtGui import QDoubleValidator
+from scipy import signal
 
-torch.rand(1)
+Ui_MainWindow, _ = uic.loadUiType(Path("ui_files") / "live_streaming_ui.ui")
+_ = torch.load(
+    "dummy_model.pt"
+)  # Load dummy model before showing UI (first torch.load call is quite slow)
 
-plot_duration = 15  # how many seconds of data to show
-update_interval = 90  # ms between screen updates
+plot_duration = 10  # how many seconds of data to show
+update_interval = 50  # ms between screen updates
 pull_interval = 90  # ms between each pull operation
 control_interval = 100  # ms between sends of each control signal
 win_len_sec = 0.750  # Length of processing window (750 ms)
-blanking_ms = 1200  # ms of waiting period after change in stim
+blanking_ms = 0.0  # ms of waiting period after change in stim
 
 
 class DataInletPlaceHolder:
     inlet = None
+    HP_filter: bool = False
 
     def __init__(self):
         pass
 
     def set_inlet(self, info: pylsl.StreamInfo, layout: pg.GraphicsLayoutWidget):
         self.inlet = DataInlet(info, layout)
+        self.inlet.HP_filter = self.HP_filter
+
+    def set_HP_filter(self, HP_filter: bool):
+        self.HP_filter = HP_filter
+        if self.inlet is not None:
+            self.inlet.HP_filter = HP_filter
 
     def pull_and_plot(self, plot_time):
         if self.inlet is None:
@@ -74,7 +82,6 @@ class DataInlet(Inlet):
     should be plotted as multiple lines."""
 
     dtypes = [[], np.float32, np.float64, None, np.int32, np.int16, np.int8, np.int64]
-    main_buffer = np.array([])
 
     def __init__(self, info: pylsl.StreamInfo, plot_layout: pg.GraphicsLayoutWidget):
         super().__init__(info)
@@ -104,6 +111,12 @@ class DataInlet(Inlet):
             plot_layout.nextRow()
 
             self.plots.append(plot)
+
+        # HP Filter Coeffs:
+        self.sos = signal.butter(4, 0.5, "highpass", output="sos", fs=self.fs)
+        self.filter_coeff = [
+            signal.sosfilt_zi(self.sos) for _ in range(info.channel_count())
+        ]
         #     #self.curves.append(curve)
 
         # self.plots.append(win.addPlot())
@@ -143,6 +156,11 @@ class DataInlet(Inlet):
 
                 y_new = y[new_offset:, ch_ix]
 
+                if self.HP_filter:
+                    y_new, self.filter_coeff[ch_ix] = signal.sosfilt(
+                        self.sos, y_new, zi=self.filter_coeff[ch_ix]
+                    )
+
                 # Save data copy:
                 # _, old_y_data = self.curves_data[ch_ix].getData()
                 # y_data = np.hstack([old_y_data[old_offset:],y_new.copy()])
@@ -155,13 +173,6 @@ class DataInlet(Inlet):
 
                 self.plots[ch_ix].curves[0].setData(this_x, this_y)
                 # self.plots[ch_ix].curves[0].setPen((0, 0, 0, 0))
-
-                try:
-                    pass
-                    # self.main_buffer[ch_ix] = this_y[-self.main_buffer.shape[-1] :].copy()
-                    # print(self.main_buffer[:,-10:])
-                except ValueError:
-                    return
 
 
 class ProcessorAndOutlet:
@@ -202,6 +213,8 @@ class ProcessorAndOutlet:
         )
         plt_off.addItem(self.score_curve_off)
         plt_off.addItem(self.out_curve_off)
+        plt_off.enableAutoRange(x=False, y=False)
+        plt_off.setYRange(0, 1, padding=0.05)
 
         self.score_curve_on = pg.PlotCurveItem(
             x=empty, y=empty, autoDownsample=True, pen=(60, 60, 250)
@@ -211,6 +224,11 @@ class ProcessorAndOutlet:
         )
         plt_on.addItem(self.score_curve_on)
         plt_on.addItem(self.out_curve_on)
+        plt_on.enableAutoRange(x=False, y=False)
+        plt_on.setYRange(0, 1, padding=0.05)
+
+    def blankingChanged(self, new_t: float):
+        self.blank_for = int(math.ceil(float(new_t) / control_interval))
 
     def set_thresh_on(self, thresh):
         self.thresh_on = thresh
@@ -231,9 +249,7 @@ class ProcessorAndOutlet:
                 finished_blanking = True
                 pass
             else:
-
-                # If blanking, don't send anything
-                return
+                return  # If blanking, don't send anything
 
         win_len = int(self.inlet.inlet.fs * win_len_sec)
 
@@ -319,10 +335,33 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.inputThreshON.editingFinished.connect(self.threshOnChanged)
         self.inputThreshON.setValidator(QDoubleValidator(0.0, 1.0, 100))
 
+        self.BlankingTimeInput.editingFinished.connect(self.blankingChanged)
+        self.BlankingTimeInput.setValidator(QDoubleValidator(0.0, 5000, 500))
+
         self.updateStreamsBtn.clicked.connect(self.updateStreams)
         self.StartStreamBtn.clicked.connect(self.startStreaming)
 
+        self.StopBtn.clicked.connect(self.stop)
+
+        self.HPCheckBox.clicked.connect(self.hpChanged)
+
+    def stop(self):
+        if hasattr(self, "timers"):
+            [timer.stop() for timer in self.timers]
+
+    def blankingChanged(self):
+        self.outlet.blankingChanged(float(self.BlankingTimeInput.text()))
+
+    def hpChanged(self):
+        self.inlet.set_HP_filter(self.HPCheckBox.isChecked())
+
     def startStreaming(self):
+
+        if hasattr(self, "timers"):
+            self.timers[0].start(update_interval)
+            self.timers[1].start(pull_interval)
+            self.timers[1].start(control_interval)
+
         selected_stream = self.streamList.selectedItems()
         if not selected_stream:
             return
@@ -336,9 +375,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def updateStreams(self):
         self.streams = pylsl.resolve_streams()
         self.stream_names = [stream.name() for stream in self.streams]
-        self_idx = self.stream_names.index(self.outlet.info.name())
-        self.streams.remove(self.streams[self_idx])
-        self.stream_names.remove(self.outlet.info.name())
+
+        try:
+            self_idx = self.stream_names.index(self.outlet.info.name())
+            self.streams.remove(self.streams[self_idx])
+            self.stream_names.remove(self.outlet.info.name())
+        except ValueError:
+            pass
 
         self.streamList.clear()
         self.streamList.addItems(self.stream_names)
@@ -354,6 +397,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def set_outlet(self, outlet):
         self.outlet = outlet
+        self.blankingChanged()
 
     def getModelOFF(self):
 
@@ -434,6 +478,8 @@ def main():
     control_timer = QtCore.QTimer()
     control_timer.timeout.connect(update_out)
     control_timer.start(control_interval)
+
+    main.timers = [update_timer, pull_timer, control_timer]
 
     sys.exit(app.exec_())
 
