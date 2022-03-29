@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 
-def send(source, destination="temp/"):
+def send(source, destination="online_runs/datafiles"):
 
     send_cmd = f"pscp -load jade {source} fernando@jade.mrc.ox.ac.uk:{destination}"
 
@@ -12,8 +12,8 @@ def send(source, destination="temp/"):
 def train_and_return(destination_local, **kwargs):
 
     fname_train = Path(Path(destination_local).name[:-1]).with_suffix(".h5")
-    train_cmd = f"""plink -load jade -batch "cd ~/temp/ && /home/fernando/anaconda3/envs/all-v4/bin/python train.py --file {str(fname_train)}" """
-    get_cmd = f"pscp -load jade fernando@jade.mrc.ox.ac.uk:temp/{str(Path(fname_train).with_suffix('.pt'))} {str(Path(destination_local).with_suffix('.pt'))}"
+    train_cmd = f"""plink -load jade -batch "cd ~/online_runs/ && /home/fernando/anaconda3/envs/all-v4/bin/python train.py --file datafiles/{str(fname_train)}" """
+    get_cmd = f"pscp -load jade fernando@jade.mrc.ox.ac.uk:online_runs/{str(Path(fname_train).with_suffix('.pt'))} {str(Path(destination_local).with_suffix('.pt'))}"
     
     print(train_cmd)
 
