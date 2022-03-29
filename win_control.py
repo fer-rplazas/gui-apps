@@ -27,9 +27,6 @@ def get_coords():
     btn_r_coords = btn_r.rectangle().mid_point()
 
 
-import time
-
-
 def clicks():
     mouse.click(coords=btn_l_coords)
     mouse.click(coords=btn_r_coords)
