@@ -9,9 +9,12 @@ Timings.fast()
 Timings.after_setcursorpos_wait = 0
 Timings.after_click_wait = 0
 
-path = "C:\\UsersData\\Johan_v08\\OptTestingTool.exe"
+
+# import subprocess
+# path = "C:\\UsersData\\Johan_v08\\OptTestingTool.exe"
+# path = "C:\\UsersData\\Johan_v08\\OptTestingTool.exe"
 app = pywinauto.Application(backend="uia").connect(
-    path=path
+    title="OPT Production Tool v1.0.0.8", timeout=1
 )  # .connect(handle='OPT Production Tool v1.0.0.8')
 
 btn_r = app.window().Pane64
