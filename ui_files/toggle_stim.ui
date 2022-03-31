@@ -51,6 +51,13 @@
          </property>
         </widget>
        </item>
+       <item>
+        <widget class="QPushButton" name="StopBtn">
+         <property name="text">
+          <string>Stop</string>
+         </property>
+        </widget>
+       </item>
       </layout>
      </widget>
     </item>
@@ -87,22 +94,6 @@
            </widget>
           </item>
          </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QFrame" name="frame_4">
-         <property name="autoFillBackground">
-          <bool>false</bool>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">background-color: rgb(0, 0, 0)</string>
-         </property>
-         <property name="frameShape">
-          <enum>QFrame::StyledPanel</enum>
-         </property>
-         <property name="frameShadow">
-          <enum>QFrame::Raised</enum>
-         </property>
         </widget>
        </item>
        <item>
