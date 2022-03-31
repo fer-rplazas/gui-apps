@@ -1,6 +1,7 @@
 import numpy as np
 import time
 from pylsl import StreamInfo, StreamOutlet, local_clock
+import random
 
 
 def main():
@@ -32,5 +33,37 @@ def main():
         time.sleep(chunk_size / fs)
 
 
+def main_control():
+    fs = 2
+    name = "simulated_cnn_output"
+    type = "control_signal"
+    n_chan = 2
+
+    info = StreamInfo(name, type, n_chan, fs, "float32", "myUID00001")
+    outlet = StreamOutlet(info)
+
+    print("sending data now...")
+    sent = False
+    true_opts = [True] * 24
+    true_opts.append(False)
+
+    false_opts = [False] * 24
+    false_opts.append(True)
+
+    while True:
+
+        if sent == True:
+            sample = random.choice(true_opts)
+
+        else:
+            sample = random.choice(false_opts)
+
+        sent = sample
+        samples = [sample, sample]
+
+        outlet.push_sample(samples)
+        time.sleep(1.0 / fs)
+
+
 if __name__ == "__main__":
-    main()
+    main_control()
