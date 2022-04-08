@@ -26,7 +26,7 @@ blanking_ms = 0.0  # ms of waiting period after change in stim
 
 class DataInletPlaceHolder:
     inlet = None
-    HP_filter: bool = False
+    HP_filter, notch50, notch100, notch150 = False, False, False, False
 
     def __init__(self):
         pass
@@ -39,6 +39,16 @@ class DataInletPlaceHolder:
         self.HP_filter = HP_filter
         if self.inlet is not None:
             self.inlet.HP_filter = HP_filter
+
+    def set_notch(self, do50, do100, do150):
+
+        self.notch50, self.notch100, self.notch150 = do50, do100, do150
+        if self.inlet is not None:
+            self.inlet.notch50, self.inlet.notch100, self.inlet.notch150 = (
+                do50,
+                do100,
+                do150,
+            )
 
     def pull_and_plot(self, plot_time):
         if self.inlet is None:
@@ -82,6 +92,7 @@ class DataInlet(Inlet):
     should be plotted as multiple lines."""
 
     dtypes = [[], np.float32, np.float64, None, np.int32, np.int16, np.int8, np.int64]
+    HP_filter, notch50, notch100, notch150 = False, False, False, False
 
     def __init__(self, info: pylsl.StreamInfo, plot_layout: pg.GraphicsLayoutWidget):
         super().__init__(info)
@@ -113,9 +124,24 @@ class DataInlet(Inlet):
             self.plots.append(plot)
 
         # HP Filter Coeffs:
-        self.sos = signal.butter(4, 0.5, "highpass", output="sos", fs=self.fs)
+        self.sos = signal.butter(8, 0.5, "highpass", output="sos", fs=self.fs)
         self.filter_coeff = [
             signal.sosfilt_zi(self.sos) for _ in range(info.channel_count())
+        ]
+
+        self.notch50params = signal.iirnotch(50, 30, fs=self.fs)
+        self.notch50coeff = [
+            signal.lfilter_zi(*self.notch50params) for _ in range(info.channel_count())
+        ]
+
+        self.notch100params = signal.iirnotch(100, 30, fs=self.fs)
+        self.notch100coeff = [
+            signal.lfilter_zi(*self.notch100params) for _ in range(info.channel_count())
+        ]
+
+        self.notch150params = signal.iirnotch(150, 30, fs=self.fs)
+        self.notch150coeff = [
+            signal.lfilter_zi(*self.notch150params) for _ in range(info.channel_count())
         ]
         #     #self.curves.append(curve)
 
@@ -161,6 +187,20 @@ class DataInlet(Inlet):
                         self.sos, y_new, zi=self.filter_coeff[ch_ix]
                     )
 
+                if self.notch50:
+                    y_new, self.notch50coeff[ch_ix] = signal.lfilter(
+                        *self.notch50params, y_new, zi=self.notch50coeff[ch_ix]
+                    )
+
+                if self.notch100:
+                    y_new, self.notch100coeff[ch_ix] = signal.lfilter(
+                        *self.notch100params, y_new, zi=self.notch100coeff[ch_ix]
+                    )
+
+                if self.notch150:
+                    y_new, self.notch150coeff[ch_ix] = signal.lfilter(
+                        *self.notch150params, y_new, zi=self.notch150coeff[ch_ix]
+                    )
                 # Save data copy:
                 # _, old_y_data = self.curves_data[ch_ix].getData()
                 # y_data = np.hstack([old_y_data[old_offset:],y_new.copy()])
@@ -344,6 +384,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.StopBtn.clicked.connect(self.stop)
 
         self.HPCheckBox.clicked.connect(self.hpChanged)
+        self.notch50Btn.clicked.connect(self.notchChanged)
+        self.notch100Btn.clicked.connect(self.notchChanged)
+        self.notch150Btn.clicked.connect(self.notchChanged)
 
     def stop(self):
         if hasattr(self, "timers"):
@@ -354,6 +397,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def hpChanged(self):
         self.inlet.set_HP_filter(self.HPCheckBox.isChecked())
+
+    def notchChanged(self):
+        self.inlet.set_notch(
+            self.notch50Btn.isChecked(),
+            self.notch100Btn.isChecked(),
+            self.notch150Btn.isChecked(),
+        )
 
     def startStreaming(self):
 

@@ -118,6 +118,27 @@
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="notch50Btn">
+            <property name="text">
+             <string>Notch-50</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="notch100Btn">
+            <property name="text">
+             <string>Notch-100</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="notch150Btn">
+            <property name="text">
+             <string>Notch-150</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QLabel" name="label">
             <property name="text">
              <string>Blanking time [ms]:</string>
@@ -239,7 +260,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>24</height>
+     <height>21</height>
     </rect>
    </property>
   </widget>
