@@ -33,8 +33,35 @@ def main():
         time.sleep(chunk_size / fs)
 
 
+def random_stim():
+    fs = 50
+    name = "random_stim"
+    type = "cntrol signals"
+    n_chan = 2
+
+    info = StreamInfo(name, type, n_chan, fs, "float32", "myUID00001")
+    outlet = StreamOutlet(info)
+
+    durations = np.random.uniform(0.25, 5, 300)
+
+    time_course = []
+    offset = 0
+    for dur in durations:
+        time_course.extend(list(0.1 + offset + np.zeros((int(dur * fs)))))
+        if offset == 0:
+            offset = 1
+        else:
+            offset = 0
+
+    print("sending data now...")
+    while True:
+        for el in time_course:
+            outlet.push_sample([el, el])
+            time.sleep(1.0 / fs)
+
+
 def main_control():
-    fs = 2
+    fs = 10
     name = "simulated_cnn_output"
     type = "control_signal"
     n_chan = 2
@@ -44,10 +71,10 @@ def main_control():
 
     print("sending data now...")
     sent = False
-    true_opts = [True] * 24
+    true_opts = [True] * 1
     true_opts.append(False)
 
-    false_opts = [False] * 24
+    false_opts = [False] * 1
     false_opts.append(True)
 
     while True:
@@ -58,6 +85,8 @@ def main_control():
         else:
             sample = random.choice(false_opts)
 
+        sample = float(sample) + 0.1
+
         sent = sample
         samples = [sample, sample]
 
@@ -66,4 +95,4 @@ def main_control():
 
 
 if __name__ == "__main__":
-    main_control()
+    random_stim()
