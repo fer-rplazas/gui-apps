@@ -1,7 +1,7 @@
 import numpy as np
 
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import iirnotch, butter, filtfilt
+from scipy.signal import iirnotch, butter, filtfilt, lfilter, sosfilt
 import sys
 from copy import deepcopy
 import h5py
@@ -49,7 +49,6 @@ class ProcessingOptions:
 
 
 class ChannelData:
-
     fs: float
     name: str
     data: np.ndarray
@@ -71,23 +70,23 @@ class ChannelData:
 
         self.update_plot()
 
-    def highpass(self, freq=1, N=3):
+    def highpass(self, freq=0.5, N=8):
         if self.data.size > 0:
             self.data_backup = self.data.copy()
-            b, a = butter(N, 1, "highpass", fs=self.fs)
-            self.data = filtfilt(b, a, self.data)
+            sos = butter(N, freq, "highpass", fs=self.fs, output="sos")
+            self.data = sosfilt(sos, self.data)
 
     def notch50(self, Q=30):
         if self.data.size > 0:
             self.data_backup = self.data.copy()
             b, a = iirnotch(50, Q, fs=self.fs)
-            self.data = filtfilt(b, a, self.data)
+            self.data = lfilter(b, a, self.data)
 
     def notch100(self, Q=30):
         if self.data.size > 0:
             self.data_backup = self.data.copy()
             b, a = iirnotch(100, Q, fs=self.fs)
-            self.data = filtfilt(b, a, self.data)
+            self.data = lfilter(b, a, self.data)
 
     def update(self, processing_options):
         update_plot = False
@@ -112,7 +111,7 @@ class ChannelData:
             update_plot = True
 
         if (not processing_options.notch100) and self.processing_options_done.notch100:
-            self.data = self.data_backup()
+            self.data = self.data_backup
             update_plot = True
 
         if update_plot:
@@ -127,7 +126,6 @@ class ChannelData:
 
 
 class ChannelGroup:
-
     channels: List[ChannelData]
     plt_area: Optional[pg.GraphicsLayoutWidget] = None
 
@@ -137,12 +135,12 @@ class ChannelGroup:
     def __init__(self, channels) -> None:
         self.channels = channels
 
-    @classmethod
-    def from_importer(cls, importer, names):
-        channels = []
-        for name in names:
-            channels.append(name, importer[name], importer.fs)
-        return cls(channels)
+    # @classmethod
+    # def from_importer(cls, importer, names):
+    #     channels = []
+    #     for name in names:
+    #         channels.append(name, importer[name], importer.fs)
+    #     return cls(channels)
 
     def reset(self):
         for plt in self.get_plots():
@@ -195,9 +193,14 @@ class ChannelGroup:
         item = self.channels[idx]
         return item
 
-    def update_chans(self, ch_list, importer, ch_order):
-        if not ch_list:
+    def update_chans(self, ch_list, importer, ch_order, renew=False):
+        if ch_list is None:
             return
+
+        if renew or (isinstance(ch_list, list) and len(ch_list) == 0):
+            self.reset()
+        # if not ch_list:
+        #     return
 
         # Check for eliminated chans:
         for my_ch in self.ch_names():
@@ -207,7 +210,7 @@ class ChannelGroup:
                 self.channels.remove(item)
 
         for potential_ch in ch_list:
-            if potential_ch not in self.ch_names():
+            if potential_ch not in self.ch_names() or renew:
                 # Create Plot Item:
                 plt = self.plt_area.addPlot(row=ch_order.index(potential_ch), col=0)
                 plt.showAxis("bottom", False)
@@ -237,6 +240,13 @@ class ChannelGroup:
     def get_dataMat(self):
         return np.stack([item.data for item in self.channels])
 
+    def reset(self):
+        for ch in self.ch_names():
+            item = self[ch]
+            if item is not None:
+                self.plt_area.removeItem(item.plt)
+                self.channels.remove(item)
+
 
 def update_all_regions(region):
     for plt in (
@@ -248,7 +258,6 @@ def update_all_regions(region):
 
 
 class Peripherals(ChannelGroup):
-
     label = np.ndarray([])
     label_score = np.ndarray([])
     smoothing_ms: float = 600
@@ -258,6 +267,12 @@ class Peripherals(ChannelGroup):
         super().__init__(channels)
 
     def reset(self):
+        for ch in self.ch_names():
+            item = self[ch]
+            if item is not None:
+                self.plt_area.removeItem(item.plt)
+                self.channels.remove(item)
+
         if hasattr(self, "lr"):
             self.label_plot.close()
             self.label_plot.parentItem().layout.removeItem(self.label_plot)
@@ -303,7 +318,14 @@ class Peripherals(ChannelGroup):
     def set_rangeArea(self, rangeArea):
         self.rangeArea = rangeArea
 
-    def update_chans(self, ch_list, importer, ch_order):
+    def update_chans(self, ch_list, importer, ch_order, renew=False):
+
+        if ch_list is None:
+            return
+
+        if renew or (isinstance(ch_list, list) and len(ch_list) == 0):
+            self.reset()
+
         if not hasattr(self, "label_plot"):
             self.label_plot = self.plt_area.addPlot(row=100, col=0)
             self.label_plot.setLabel("left", "Label")
@@ -338,6 +360,8 @@ class Peripherals(ChannelGroup):
         self.update_label_plot()
 
     def update_label_plot(self):
+        if not self.channels:
+            return
         self.score_curve.setData(self.channels[0].t, self.label_score)
         self.score_curve.setPen((100, 100, 240))
         self.label_curve.setData(
@@ -349,7 +373,6 @@ class Peripherals(ChannelGroup):
 
 
 class DataModel:
-
     selected_lfps: List[str] = []
     selected_peri: List[str] = []
 
@@ -407,9 +430,11 @@ class DataModel:
 
         self.selected_lfps, self.selected_peri = selected_lfps, selected_peri
 
-        self.lfps.update_chans(selected_lfps, self.importer, self.lfp_candidates)
+        self.lfps.update_chans(
+            selected_lfps, self.importer, self.lfp_candidates, renew=True
+        )
         self.peripherals.update_chans(
-            selected_peri, self.importer, self.peri_candidates,
+            selected_peri, self.importer, self.peri_candidates, renew=True
         )
 
         # # self.lfp_raw = LFPData.from_importer(self.importer, self.selected_lfps)
@@ -487,11 +512,29 @@ class DataModel:
 
     def setImporter(self, importer):
 
-        self.importer = importer
-        ch_list = self.importer.ch_names
-        self.lfp_candidates = [ch for ch in ch_list if ch[0] in ["L", "R"]]
-        self.peri_candidates = [ch for ch in ch_list if ch[0] in ["A", "E"]]
-        self.t = importer.t()
+        if self.importer is None:
+            self.importer = importer
+            ch_list = self.importer.ch_names
+            self.lfp_candidates = [ch for ch in ch_list if ch[0] in ["L", "R"]]
+            self.peri_candidates = [ch for ch in ch_list if ch[0] in ["A", "E"]]
+            self.t = importer.t()
+        else:
+            self.importer = importer
+            ch_list = self.importer.ch_names
+            lfp_candidates = [ch for ch in ch_list if ch[0] in ["L", "R"]]
+            peri_candidates = [ch for ch in ch_list if ch[0] in ["A", "E"]]
+            self.t = importer.t()
+            if (
+                lfp_candidates == self.lfp_candidates
+                and peri_candidates == self.peri_candidates
+            ):
+                # Trigger data refresh
+                self.setSelected(self.selected_lfps, self.selected_peri)
+            else:
+                self.lfp_candidates = lfp_candidates
+                self.peri_candidates = peri_candidates
+                self.setSelected(self.selected_lfps, self.selected_peri)
+                return True
 
 
 # Initialize data model object:
@@ -499,7 +542,6 @@ data_model = DataModel()
 
 
 class ChannelSelector(QWidget):
-
     layout = QVBoxLayout()
     lfp_chans = []
     peri_chans = []
@@ -530,6 +572,7 @@ class ChannelSelector(QWidget):
         self.layout.addWidget(self.PeripheralChannelSelector)
 
     def add_lfp_chans(self, ch_names: List[str]):
+        self.reset()
         for ch in ch_names:
             selector = QCheckBox(ch)
             selector.stateChanged.connect(self.selectionChanged)
@@ -554,6 +597,11 @@ class ChannelSelector(QWidget):
                 else:
                     raise ValueError("Unknown Channel selected")
 
+        if not selected_lfps:
+            selected_lfps = None
+        if not selected_peri:
+            selected_peri = None
+
         data_model.lfps.update_chans(
             selected_lfps, data_model.importer, data_model.lfp_candidates,
         )
@@ -564,6 +612,8 @@ class ChannelSelector(QWidget):
     def reset(self):
         for selector in self.lfp_chans + self.peri_chans:
             selector.close()
+
+        self.lfp_chans, self.peri_chans = [], []
 
 
 class LFPProcessingArea(QWidget):
@@ -899,16 +949,25 @@ class Window(QMainWindow):
     def fileOpen(self):
 
         self.fname, _ = QFileDialog.getOpenFileName(
-            self, "QFileDialog.getOpenFileName()", "", "SMR Files (*.smr)"
+            self, "Please select an SMR file", "", "SMR Files (*.smr)"
         )
         self.fname = Path(self.fname)
 
-        data_model.setImporter(SmrImporter(self.fname))
-        lfp_candidates = data_model.lfp_candidates
-        peri_candidates = data_model.peri_candidates
+        if data_model.importer is None:
+            data_model.setImporter(SmrImporter(self.fname))
+            lfp_candidates = data_model.lfp_candidates
+            peri_candidates = data_model.peri_candidates
 
-        self.channelSelector.add_lfp_chans(lfp_candidates)
-        self.channelSelector.add_peri_chans(peri_candidates)
+            self.channelSelector.add_lfp_chans(lfp_candidates)
+            self.channelSelector.add_peri_chans(peri_candidates)
+
+        else:
+            retVal = data_model.setImporter(SmrImporter(self.fname))
+            if retVal is not None:
+                lfp_candidates = data_model.lfp_candidates
+                peri_candidates = data_model.peri_candidates
+                self.channelSelector.add_lfp_chans(lfp_candidates)
+                self.channelSelector.add_peri_chans(peri_candidates)
 
     #         self.selector_list = []
     #         for ch in lfp_candidates:
