@@ -38,6 +38,8 @@ from lfp_analysis.data import SmrImporter
 from typing import List, Optional
 from send_to_train import send, train_and_return
 
+TREMOR_BAND: bool = False
+
 
 class ProcessingOptions:
     highpass = False
@@ -299,6 +301,10 @@ class Peripherals(ChannelGroup):
 
         data = np.stack([ch.data for ch in self.channels])
         norm = np.linalg.norm(data, axis=0)
+
+        if TREMOR_BAND:
+            sos = butter(4, [3, 7], "bandpass", output="sos", fs=self.channels[0].fs)
+            norm = sosfilt(sos, norm)
 
         smoothed = uniform_filter1d(
             np.abs(norm), size=int(self.channels[0].fs * self.smoothing_ms / 1000)
@@ -603,7 +609,9 @@ class ChannelSelector(QWidget):
             selected_peri = None
 
         data_model.lfps.update_chans(
-            selected_lfps, data_model.importer, data_model.lfp_candidates,
+            selected_lfps,
+            data_model.importer,
+            data_model.lfp_candidates,
         )
         data_model.peripherals.update_chans(
             selected_peri, data_model.importer, data_model.peri_candidates
@@ -663,6 +671,9 @@ class PeriProcessingArea(QWidget):
         self.highPassCheck = QCheckBox("Highpass")
         self.highPassCheck.stateChanged.connect(self.processingChanged)
 
+        self.tremorBandcheck = QCheckBox("3-7 Hz")
+        self.tremorBandcheck.stateChanged.connect(self.processingChangedTremor)
+
         self.smoothingLabel = QLabel("Smoothing [ms]:")
         self.smoothingInput = QLineEdit()
         self.smoothingInput.setValidator(QDoubleValidator())
@@ -685,6 +696,10 @@ class PeriProcessingArea(QWidget):
         self.layout.addWidget(self.smoothingInput)
         self.layout.addWidget(self.threshLabel)
         self.layout.addWidget(self.threshInput)
+
+    def processingChangedTremor(self):
+        global TREMOR_BAND
+        TREMOR_BAND = True
 
     def processingChanged(self):
         processing_state = ProcessingOptions()
@@ -711,7 +726,6 @@ class PeriProcessingArea(QWidget):
 
 
 class SignalsArea(QWidget):
-
     layout = QGridLayout()
 
     def __init__(self):
