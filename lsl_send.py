@@ -42,7 +42,7 @@ def random_stim():
     info = StreamInfo(name, type, n_chan, fs, "float32", "myUID00001")
     outlet = StreamOutlet(info)
 
-    durations = np.random.uniform(0.25, 5, 300)
+    durations = np.random.uniform(0.5, 5.0, 300)
 
     time_course = []
     offset = 0
