@@ -692,6 +692,7 @@ class PeriProcessingArea(QWidget):
 
         # Set layout:
         self.layout.addWidget(self.highPassCheck)
+        self.layout.addWidget(self.tremorBandcheck)
         self.layout.addWidget(self.smoothingLabel)
         self.layout.addWidget(self.smoothingInput)
         self.layout.addWidget(self.threshLabel)
@@ -699,7 +700,7 @@ class PeriProcessingArea(QWidget):
 
     def processingChangedTremor(self):
         global TREMOR_BAND
-        TREMOR_BAND = True
+        TREMOR_BAND = self.tremorBandcheck.isChecked()
 
     def processingChanged(self):
         processing_state = ProcessingOptions()
