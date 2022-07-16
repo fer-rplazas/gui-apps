@@ -19,7 +19,7 @@ _ = torch.load(
 plot_duration = 10  # how many seconds of data to show
 update_interval = 50  # ms between screen updates
 pull_interval = 90  # ms between each pull operation
-control_interval = 100  # ms between sends of each control signal
+control_interval = 250  # ms between sends of each control signal
 win_len_sec = 0.750  # Length of processing window (750 ms)
 blanking_ms = 0.0  # ms of waiting period after change in stim
 
@@ -267,6 +267,9 @@ class ProcessorAndOutlet:
         plt_on.enableAutoRange(x=False, y=False)
         plt_on.setYRange(0, 1, padding=0.05)
 
+        self.model_on_state = []
+        self.model_off_state = []
+
     def blankingChanged(self, new_t: float):
         self.blank_for = int(math.ceil(float(new_t) / control_interval))
 
@@ -307,12 +310,22 @@ class ProcessorAndOutlet:
         # Select what model to use:
         if self.stim_is_on:
             model = self.model_on
+            state = self.model_on_state
+            other_state = self.model_off_state
         else:
             model = self.model_off
+            state = self.model_off_state
+            other_state = self.model_on_state
+
 
         with torch.no_grad():
             x = torch.Tensor(to_process).unsqueeze(0)
-            out_l = model(x).squeeze()
+            if not state:
+                out_l,(h,c) = model(x).squeeze()
+            else:
+                out_l,(h,c) = model(x,tuple(state)).squeeze()
+            state = list((h,c))
+            other_state.clear()
             out = torch.nn.functional.softmax(out_l, dim=0).squeeze()[1].item()
         # print(out)
 

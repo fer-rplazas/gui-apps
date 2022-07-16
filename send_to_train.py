@@ -12,7 +12,7 @@ def send(source, destination="online_runs/datafiles"):
 def train_and_return(destination_local, **kwargs):
 
     fname_train = Path(Path(destination_local).name[:-1]).with_suffix(".h5")
-    train_cmd = f"""plink -load jade -batch "cd ~/online_runs/ && /home/fernando/anaconda3/envs/all-v4/bin/python train.py --file datafiles/{str(fname_train)}" """
+    train_cmd = f"""plink -load jade -batch "cd ~/online_runs/ && /home/fernando/anaconda3/envs/all-v4/bin/python train_v2.py --file datafiles/{str(fname_train)}" """
     get_cmd = f"pscp -load jade fernando@jade.mrc.ox.ac.uk:online_runs/datafiles/{str(Path(fname_train).with_suffix('.pt'))} {str(Path(destination_local).with_suffix('.pt'))}"
     
     print(train_cmd)

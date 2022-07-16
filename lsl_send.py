@@ -8,7 +8,7 @@ def main():
     fs = 4096.0
     name = "Test Stream"
     type = "LFPs"
-    n_chan = 14
+    n_chan = 13
 
     chunk_size = 32
 
@@ -95,4 +95,5 @@ def main_control():
 
 
 if __name__ == "__main__":
+    main()
     random_stim()
