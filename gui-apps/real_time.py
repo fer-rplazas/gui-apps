@@ -18,7 +18,7 @@ from real_time_model import *
 
 Ui_MainWindow, _ = uic.loadUiType(Path("ui_files") / "live_streaming_ui.ui")
 _ = torch.load(
-    "saved_models/dummy_model.pt"
+    "saved_models/dummy_model_13_chan.pt"
 )  # Load dummy model before showing UI (first torch.load call is slow)
 
 plot_duration = 10  # how many seconds of data to show
