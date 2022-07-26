@@ -52,7 +52,7 @@ class ChannelData:
 
         self.update_plot()
 
-    def highpass(self, freq=1.0, N=6):
+    def highpass(self, freq=1.0, N=4):
         if self.data.size > 0:
             self.data_backup = self.data.copy()
             sos = butter(N, freq, "highpass", fs=self.fs, output="sos")

@@ -32,7 +32,7 @@ class RealTimeModelABC(ABC):
 
 class StateFulFilter:
     def __init__(self, fs, cutoff_freq: float = 1.0):
-        self.sos = butter(6, cutoff_freq, "highpass", fs=fs, output="sos")
+        self.sos = butter(4, cutoff_freq, "highpass", fs=fs, output="sos")
         self.zi = None
 
     def forward(self, x: np.ndarray) -> np.ndarray:
