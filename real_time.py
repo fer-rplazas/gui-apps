@@ -11,6 +11,9 @@ from PyQt5 import QtCore, QtWidgets, uic
 from PyQt5.QtGui import QDoubleValidator
 from scipy import signal
 
+import logging
+logging.basicConfig(level=logging.INFO, filename='output.log')
+
 Ui_MainWindow, _ = uic.loadUiType(Path("ui_files") / "live_streaming_ui.ui")
 _ = torch.load(
     "dummy_model.pt"
@@ -20,7 +23,7 @@ plot_duration = 10  # how many seconds of data to show
 update_interval = 50  # ms between screen updates
 pull_interval = 90  # ms between each pull operation
 control_interval = 250  # ms between sends of each control signal
-win_len_sec = 0.750  # Length of processing window (750 ms)
+win_len_sec = 1  # Length of processing window (750 ms)
 blanking_ms = 0.0  # ms of waiting period after change in stim
 
 
@@ -303,6 +306,9 @@ class ProcessorAndOutlet:
             if to_process.shape[-1] < win_len:
                 return
             to_process = to_process[:, -win_len:]
+
+            logging.info(to_process.shape)
+            
             # to_process = filtfilt(b,a,data).copy()
         except (ValueError, RuntimeError):
             return
@@ -319,14 +325,17 @@ class ProcessorAndOutlet:
 
 
         with torch.no_grad():
-            x = torch.Tensor(to_process).unsqueeze(0)
+            x = torch.Tensor(to_process).unsqueeze(0).unsqueeze(0)
             if not state:
-                out_l,(h,c) = model(x).squeeze()
+                out_l,(h,c) = model.forward_realtime(x)
+                out_l.squeeze_()
             else:
-                out_l,(h,c) = model(x,tuple(state)).squeeze()
+                out_l,(h,c) = model.forward_realtime(x,tuple(state))
+                out_l.squeeze_()
             state = list((h,c))
             other_state.clear()
-            out = torch.nn.functional.softmax(out_l, dim=0).squeeze()[1].item()
+            out = torch.sigmoid(out_l).squeeze().item()
+            logging.info(out)
         # print(out)
 
         # Send to stream:
