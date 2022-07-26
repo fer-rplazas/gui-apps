@@ -14,16 +14,18 @@ from scipy import signal
 import logging
 logging.basicConfig(level=logging.INFO, filename='output.log')
 
+from real_time_model import *
+
 Ui_MainWindow, _ = uic.loadUiType(Path("ui_files") / "live_streaming_ui.ui")
 _ = torch.load(
-    "dummy_model.pt"
-)  # Load dummy model before showing UI (first torch.load call is quite slow)
+    "saved_models/dummy_model.pt"
+)  # Load dummy model before showing UI (first torch.load call is slow)
 
 plot_duration = 10  # how many seconds of data to show
 update_interval = 50  # ms between screen updates
 pull_interval = 90  # ms between each pull operation
 control_interval = 250  # ms between sends of each control signal
-win_len_sec = 1  # Length of processing window (750 ms)
+win_len_sec = 0.750  # Length of processing window (750 ms)
 blanking_ms = 0.0  # ms of waiting period after change in stim
 
 
@@ -221,6 +223,7 @@ class DataInlet(Inlet):
 class ProcessorAndOutlet:
     model_off = None
     model_on = None
+    preprocessor = None
     stim_is_on = False
     blanking = False
     blanking_counter: int = 0
@@ -313,30 +316,23 @@ class ProcessorAndOutlet:
         except (ValueError, RuntimeError):
             return
 
+
+        # Preprocess data:
+        if self.preprocessor is not None:
+            to_process = self.preprocessor.forward(to_process)
+
         # Select what model to use:
         if self.stim_is_on:
             model = self.model_on
-            state = self.model_on_state
-            other_state = self.model_off_state
+            other_model = self.model_off
         else:
             model = self.model_off
-            state = self.model_off_state
-            other_state = self.model_on_state
+            other_model = self.model_on
 
+        out = model.forward(to_process)
+        other_model.reset_state()
 
-        with torch.no_grad():
-            x = torch.Tensor(to_process).unsqueeze(0).unsqueeze(0)
-            if not state:
-                out_l,(h,c) = model.forward_realtime(x)
-                out_l.squeeze_()
-            else:
-                out_l,(h,c) = model.forward_realtime(x,tuple(state))
-                out_l.squeeze_()
-            state = list((h,c))
-            other_state.clear()
-            out = torch.sigmoid(out_l).squeeze().item()
-            logging.info(out)
-        # print(out)
+        logging.info(out)
 
         # Send to stream:
         last_out = self.out_cat
@@ -477,19 +473,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self, "QFileDialog.getOpenFileName()", "", "PT Files (*.pt)"
         )
         self.fname = Path(self.fname)
-        model = torch.load(self.fname)
-        model.eval()
-        self.outlet.model_off = model
+        self.outlet.preprocessor, self.outlet.model_off = load_model(self.fname)
 
     def getModelON(self):
         self.fname, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "QFileDialog.getOpenFileName()", "", "PT Files (*.pt)"
         )
         self.fname = Path(self.fname)
-
-        model = torch.load(self.fname)
-        model.eval()
-        self.outlet.model_on = model
+        self.outlet.preprocessor, self.outlet.model_on = load_model(self.fname)
 
 
 def main():
