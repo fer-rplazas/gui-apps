@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 
-def send(source, destination="online_runs/datafiles"):
+def send_data_to_jade(source, destination="online_runs/datafiles"):
 
     send_cmd = f"pscp -load jade {source} fernando@jade.mrc.ox.ac.uk:{destination}"
 

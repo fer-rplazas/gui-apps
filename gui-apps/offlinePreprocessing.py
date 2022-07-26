@@ -1,9 +1,8 @@
 import numpy as np
 
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import iirnotch, butter, filtfilt, lfilter, sosfilt
+from scipy.signal import iirnotch, butter, lfilter, sosfilt
 import sys
-from copy import deepcopy
 import h5py
 import h5py.defs
 import h5py.utils
@@ -23,7 +22,6 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QCheckBox,
     QVBoxLayout,
-    QHBoxLayout,
     QWidget,
     QFrame,
     QGroupBox,
@@ -32,14 +30,12 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QDoubleValidator
 
 import pyqtgraph as pg
-
 from lfp_analysis.data import SmrImporter
 
 from typing import List, Optional
-from send_to_train import send, train_and_return
+from send_to_train import send_data_to_jade, train_and_return
 
 TREMOR_BAND: bool = False
-
 
 class ProcessingOptions:
     highpass = False
@@ -136,13 +132,6 @@ class ChannelGroup:
 
     def __init__(self, channels) -> None:
         self.channels = channels
-
-    # @classmethod
-    # def from_importer(cls, importer, names):
-    #     channels = []
-    #     for name in names:
-    #         channels.append(name, importer[name], importer.fs)
-    #     return cls(channels)
 
     def reset(self):
         for plt in self.get_plots():
@@ -1043,7 +1032,7 @@ class Window(QMainWindow):
     def train(self):
 
         self.exportData(choose_file=False)
-        send(f'''"{str(self.fname.with_suffix(".h5"))}"''')
+        send_data_to_jade(f'''"{str(self.fname.with_suffix(".h5"))}"''')
         train_and_return(f'''"{self.fname.with_suffix(".h5")}"''')
 
     def _createActions(self):
