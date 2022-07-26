@@ -1015,18 +1015,18 @@ class Window(QMainWindow):
         f = h5py.File(self.fname.with_suffix(".h5"), "w")
 
         lfps = data_model.lfps.get_dataMat()[:, start_idx:end_idx]
-        ch_names_orig = deepcopy(data_model.selected_lfps)
-        ch_names = data_model.selected_lfps
+        ch_names_orig = deepcopy(data_model.lfps.ch_names())
+        ch_names = data_model.lfps.ch_names()
 
         if hasattr(data_model, "do_bipolar"):
             if data_model.do_bipolar:
-                bip = BipolarContructor(data_model.selected_lfps)
+                bip = BipolarContructor(data_model.lfps.ch_names())
                 lfps = bip.form_bipolar(lfps)
                 ch_names = bip.out_names
 
         f.create_dataset("LFP", data=lfps)
-        f.create_dataset("ch_names", data=np.array(ch_names))
-        f.create_dataset("ch_names_orig", data=np.array(ch_names_orig))
+        f.create_dataset("ch_names", data=ch_names)
+        f.create_dataset("ch_names_orig", data=ch_names_orig)
         f.create_dataset("label", data=data_model.peripherals.label[start_idx:end_idx])
         f.create_dataset("fs", data=np.array(data_model.lfps.channels[0].fs))
         f.close()
