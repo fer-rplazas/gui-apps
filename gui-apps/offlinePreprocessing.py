@@ -1,41 +1,25 @@
-import numpy as np
-
-from scipy.ndimage import uniform_filter1d
-from scipy.signal import iirnotch, butter, lfilter, sosfilt
 import sys
-import h5py
-import h5py.defs
-import h5py.utils
-import h5py.h5ac
-import h5py._proxy
-
+from copy import deepcopy
 from pathlib import Path
-
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QMenu,
-    QLabel,
-    QAction,
-    QFileDialog,
-    QGridLayout,
-    QCheckBox,
-    QVBoxLayout,
-    QWidget,
-    QFrame,
-    QGroupBox,
-    QLineEdit,
-)
-from PyQt5.QtGui import QDoubleValidator
-
-import pyqtgraph as pg
-from lfp_analysis.data import SmrImporter
-
 from typing import List, Optional
+
+import h5py
+import numpy as np
+import pyqtgraph as pg
+from lfp_analysis.data import BipolarContructor, SmrImporter
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QDoubleValidator
+from PyQt5.QtWidgets import (QAction, QApplication, QCheckBox, QFileDialog,
+                             QFrame, QGridLayout, QGroupBox, QLabel, QLineEdit,
+                             QMainWindow, QMenu, QVBoxLayout, QWidget)
+from scipy.ndimage import uniform_filter1d
+from scipy.signal import butter, iirnotch, lfilter, sosfilt, sosfilt_zi
+
+from real_time_model import RealTimePreProcessor, StateFulFilter
 from send_to_train import send_data_to_jade, train_and_return
 
 TREMOR_BAND: bool = False
+
 
 class ProcessingOptions:
     highpass = False
@@ -68,11 +52,12 @@ class ChannelData:
 
         self.update_plot()
 
-    def highpass(self, freq=0.5, N=8):
+    def highpass(self, freq=1.0, N=6):
         if self.data.size > 0:
             self.data_backup = self.data.copy()
             sos = butter(N, freq, "highpass", fs=self.fs, output="sos")
-            self.data = sosfilt(sos, self.data)
+            zi = sosfilt_zi(sos)
+            self.data,_ = sosfilt(sos, self.data, zi=zi)
 
     def notch50(self, Q=30):
         if self.data.size > 0:
@@ -628,11 +613,14 @@ class LFPProcessingArea(QWidget):
         self.notch50Check.stateChanged.connect(self.processingChanged)
         self.notch100Check = QCheckBox("Notch 100")
         self.notch100Check.stateChanged.connect(self.processingChanged)
+        self.bipolarCheck = QCheckBox("Bipolar")
+        self.bipolarCheck.stateChanged.connect(self.processingChanged)
 
         # Set layout:
         self.layout.addWidget(self.highPassCheck)
         self.layout.addWidget(self.notch50Check)
         self.layout.addWidget(self.notch100Check)
+        self.layout.addWidget(self.bipolarCheck)
 
     def processingChanged(self):
         processing_state = ProcessingOptions()
@@ -644,6 +632,9 @@ class LFPProcessingArea(QWidget):
 
         if self.notch100Check.isChecked():
             processing_state.notch100 = True
+
+        if self.bipolarCheck.isChecked():
+            data_model.do_bipolar = True
 
         data_model.lfps.update(processing_state)
 
@@ -1015,16 +1006,27 @@ class Window(QMainWindow):
                 self, "QFileDialog.getSaveFileName()", "", "H5 File (*.h5)"
             )
 
-            self.fname = Path(self.fname)
+            self.fname = Path(fname)
 
         start_t, end_t = data_model.peripherals.lr.getRegion()
         start_idx = data_model.peripherals.channels[0].t.searchsorted(start_t)
         end_idx = data_model.peripherals.channels[0].t.searchsorted(end_t)
 
         f = h5py.File(self.fname.with_suffix(".h5"), "w")
-        f.create_dataset(
-            "LFP", data=data_model.lfps.get_dataMat()[:, start_idx:end_idx]
-        )
+
+        lfps = data_model.lfps.get_dataMat()[:, start_idx:end_idx]
+        ch_names_orig = deepcopy(data_model.selected_lfps)
+        ch_names = data_model.selected_lfps
+
+        if hasattr(data_model, "do_bipolar"):
+            if data_model.do_bipolar:
+                bip = BipolarContructor(data_model.selected_lfps)
+                lfps = bip.form_bipolar(lfps)
+                ch_names = bip.out_names
+
+        f.create_dataset("LFP", data=lfps)
+        f.create_dataset("ch_names", data=np.array(ch_names))
+        f.create_dataset("ch_names_orig", data=np.array(ch_names_orig))
         f.create_dataset("label", data=data_model.peripherals.label[start_idx:end_idx])
         f.create_dataset("fs", data=np.array(data_model.lfps.channels[0].fs))
         f.close()
