@@ -4,21 +4,26 @@ from pylsl import StreamInfo, StreamOutlet
 
 
 
-def from_array(data: np.ndarray, fs: float, chunk_size: int = 32):
+def from_array(data: np.ndarray, fs: float, chunk_size: int = 32, y:np.ndarray = None):
     """Send array as real-time LSL stream in infinite loop
 
     Args:
         data (np.ndarray): LFPs of shape [n_chan x n_samples]
+        y (np.ndarray): Related data to send out in another stream (e.g. labels)
         fs (float): Sampling rate of the data
         chunk_size (int): number of samples to be sent out at once to stream (LSL sending frequency will be adjusted accordingly)
-    """    
+    """
     name = "Data Stream"
     type_ = "LFPs"
     n_chan = data.shape[0]
 
     info = StreamInfo(name, type_, n_chan, fs, "float32", "myUID111")
-
     outlet = StreamOutlet(info, chunk_size=chunk_size)
+
+    if y is not None:
+        info2 = StreamInfo('y_stream', '', 1, fs, "float32", "myUID112")
+        outlet2 = StreamOutlet(info2, chunk_size=chunk_size)
+
 
     print("sending data now ...")
 
@@ -29,6 +34,9 @@ def from_array(data: np.ndarray, fs: float, chunk_size: int = 32):
             samples = data[:,int(n*chunk_size):int((n+1)*chunk_size)].tolist()
 
             outlet.push_chunk(samples)
+
+            if y is not None:
+                outlet2.push_chunk(y[int(n*chunk_size):int((n+1)*chunk_size)].tolist())
 
             time.sleep(chunk_size / fs)
 
