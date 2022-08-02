@@ -18,7 +18,7 @@ def train_and_return(local_path: Union[str, os.PathLike]):
 
     dataset_filename = Path(Path(local_path).name[:-1]).with_suffix(".h5")
 
-    suffixes = [".cnn", ".svm", ".yaml"]
+    suffixes = [".cnn", ".svm", ".pkl"]
 
     train_cmd = f"""plink -load jade -batch "cd ~/online_runs/ && /home/fernando/anaconda3/envs/all-v4/bin/python train_v2.py --file datafiles/{str(dataset_filename)}" """
     get_cmds = [

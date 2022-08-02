@@ -10,9 +10,13 @@ import torch
 from PyQt5 import QtCore, QtWidgets, uic
 from PyQt5.QtGui import QDoubleValidator
 from scipy import signal
+from copy import deepcopy
+import warnings
 
+np.seterr(all='warn')
 import logging
-logging.basicConfig(level=logging.INFO, filename='output.log')
+
+logging.basicConfig(level=logging.INFO, filename="output.log")
 
 from real_time_model import *
 
@@ -24,8 +28,9 @@ _ = torch.load(
 plot_duration = 10  # how many seconds of data to show
 update_interval = 50  # ms between screen updates
 pull_interval = 90  # ms between each pull operation
+plot_interval = int(1 / 24.0 * 1000) # 24 Hz plotting 
 control_interval = 250  # ms between sends of each control signal
-win_len_sec = 0.750  # Length of processing window (750 ms)
+win_len_sec = 0.75 # Length of processing window (750 ms)
 blanking_ms = 0.0  # ms of waiting period after change in stim
 
 
@@ -55,10 +60,15 @@ class DataInletPlaceHolder:
                 do150,
             )
 
-    def pull_and_plot(self, plot_time):
+    def plot(self):
         if self.inlet is None:
             return
-        self.inlet.pull_and_plot(plot_time)
+        self.inlet.plot()
+
+    def pull(self):
+        if self.inlet is None:
+            return
+        self.inlet.pull()
 
 
 class Inlet:
@@ -92,6 +102,21 @@ class Inlet:
         pass
 
 
+class SignalBuffer:
+    def __init__(self, n_chan: int, max_samps: int):
+        self.X = np.empty((n_chan, 0))
+        self.t = np.empty((0))
+        self.max_samps = max_samps
+
+    def push(self, ts, x):
+        self.X = np.append(self.X, x, axis=-1)
+        self.t = np.append(self.t, ts, axis=-1)
+
+        if self.X.shape[-1] > self.max_samps or self.t.size > self.max_samps:
+            self.X = self.X[:, int(self.X.shape[-1] - self.max_samps) :]
+            self.t = self.t[int(self.t.shape[-1] - self.max_samps) :]
+
+
 class DataInlet(Inlet):
     """A DataInlet represents an inlet with continuous, multi-channel data that
     should be plotted as multiple lines."""
@@ -109,6 +134,7 @@ class DataInlet(Inlet):
         # print(info.nominal_srate())
         self.buffer = np.empty(bufsize, dtype=self.dtypes[info.channel_format()])
 
+        self.signal_buffer = SignalBuffer(info.channel_count(), self.fs * 20)
         # Create plots and curves:
         empty = np.array([])
 
@@ -148,6 +174,10 @@ class DataInlet(Inlet):
         self.notch150coeff = [
             signal.lfilter_zi(*self.notch150params) for _ in range(info.channel_count())
         ]
+
+        self.ts = np.array([0])
+
+        self.counter = 0
         #     #self.curves.append(curve)
 
         # self.plots.append(win.addPlot())
@@ -156,68 +186,95 @@ class DataInlet(Inlet):
         # self.plots[-1].addItem(self.curves[-1])
         # self.plots[-1].enableAutoRange(x=False, y=True)
 
-    def pull_and_plot(self, plot_time):
-        # pull the data
-        _, ts = self.inlet.pull_chunk(
-            timeout=0.0, max_samples=self.buffer.shape[0], dest_obj=self.buffer
+    def pull(self):
+        samps, ts = self.inlet.pull_chunk(
+            timeout=0.0, max_samples=4096 * 30, dest_obj=None
         )
-        # ts will be empty if no samples were pulled, a list of timestamps otherwise
+
         if ts:
-            ts = np.asarray(ts)
-            y = self.buffer[0 : ts.size, :]
-            this_x = None
-            old_offset = 0
-            new_offset = 0
-            for ch_ix in range(self.channel_count):
-                # we don't pull an entire screen's worth of data, so we have to
-                # trim the old data and append the new data to it
-                old_x, old_y = self.plots[ch_ix].curves[0].getData()
-                # the timestamps are identical for all channels, so we need to do
-                # this calculation only once
-                if ch_ix == 0:
-                    # find the index of the first sample that's still visible,
-                    # i.e. newer than the left border of the plot
-                    old_offset = old_x.searchsorted(plot_time)
-                    # same for the new data, in case we pulled more data than
-                    # can be shown at once
-                    new_offset = ts.searchsorted(plot_time)
-                    # append new timestamps to the trimmed old timestamps
-                    this_x = np.hstack((old_x[old_offset:], ts[new_offset:]))
-                # append new data to the trimmed old data
+            self.signal_buffer.push(np.asarray(ts), np.asarray(samps).T)
 
-                y_new = y[new_offset:, ch_ix]
+    def plot(self):
+        # pull the data
+        # _, ts = self.inlet.pull_chunk(
+        #     timeout=0.0, max_samples=self.buffer.shape[0], dest_obj=self.buffer
+        # )
 
-                if self.HP_filter:
-                    y_new, self.filter_coeff[ch_ix] = signal.sosfilt(
-                        self.sos, y_new, zi=self.filter_coeff[ch_ix]
-                    )
+        # ts will be empty if no samples were pulled, a list of timestamps otherwise
 
-                if self.notch50:
-                    y_new, self.notch50coeff[ch_ix] = signal.lfilter(
-                        *self.notch50params, y_new, zi=self.notch50coeff[ch_ix]
-                    )
+        for ch_ix in range(self.channel_count):
+            self.plots[ch_ix].curves[0].setData(
+                self.signal_buffer.t[-int(plot_duration * self.fs) :],
+                self.signal_buffer.X[ch_ix, -int(plot_duration * self.fs) :],
+            )
 
-                if self.notch100:
-                    y_new, self.notch100coeff[ch_ix] = signal.lfilter(
-                        *self.notch100params, y_new, zi=self.notch100coeff[ch_ix]
-                    )
+        # if ts:
 
-                if self.notch150:
-                    y_new, self.notch150coeff[ch_ix] = signal.lfilter(
-                        *self.notch150params, y_new, zi=self.notch150coeff[ch_ix]
-                    )
-                # Save data copy:
-                # _, old_y_data = self.curves_data[ch_ix].getData()
-                # y_data = np.hstack([old_y_data[old_offset:],y_new.copy()])
+        #     self.signal_buffer.push(np.asarray(ts), np.asarray(samps).T)
 
-                # y_new = (y_new - y_new.mean()) / y_new.std() - 5 * ch_ix
-                this_y = np.hstack((old_y[old_offset:], y_new))
-                # this_y = ( this_y - this_y.mean() ) / this_y.std()
-                # print(this_y.shape)
-                # replace the old data
+        #     # print(self.signal_buffer.X.shape)
+        #     # old_ts = deepcopy(self.ts)
+        #     ts = np.asarray(ts)
+        #     # print(ts.shape)
 
-                self.plots[ch_ix].curves[0].setData(this_x, this_y)
-                # self.plots[ch_ix].curves[0].setPen((0, 0, 0, 0))
+        #     # print(ts[0] in old_ts)
+
+        #     # self.ts = ts
+        #     # y = self.buffer[0 : ts.size, :]
+        #     y = np.asarray(samps)
+        #     this_x = None
+        #     old_offset = 0
+        #     new_offset = 0
+        #     for ch_ix in range(self.channel_count):
+        #         # we don't pull an entire screen's worth of data, so we have to
+        #         # trim the old data and append the new data to it
+        #         old_x, old_y = self.plots[ch_ix].curves[0].getData()
+        #         # the timestamps are identical for all channels, so we need to do
+        #         # this calculation only once
+        #         if ch_ix == 0:
+        #             # find the index of the first sample that's still visible,
+        #             # i.e. newer than the left border of the plot
+        #             old_offset = old_x.searchsorted(plot_time)
+        #             # same for the new data, in case we pulled more data than
+        #             # can be shown at once
+        #             new_offset = ts.searchsorted(plot_time)
+        #             # append new timestamps to the trimmed old timestamps
+        #             this_x = np.hstack((old_x[old_offset:], ts[new_offset:]))
+        #         # append new data to the trimmed old data
+
+        #         y_new = y[new_offset:, ch_ix]
+
+        #         if self.HP_filter:
+        #             y_new, self.filter_coeff[ch_ix] = signal.sosfilt(
+        #                 self.sos, y_new, zi=self.filter_coeff[ch_ix]
+        #             )
+
+        #         if self.notch50:
+        #             y_new, self.notch50coeff[ch_ix] = signal.lfilter(
+        #                 *self.notch50params, y_new, zi=self.notch50coeff[ch_ix]
+        #             )
+
+        #         if self.notch100:
+        #             y_new, self.notch100coeff[ch_ix] = signal.lfilter(
+        #                 *self.notch100params, y_new, zi=self.notch100coeff[ch_ix]
+        #             )
+
+        #         if self.notch150:
+        #             y_new, self.notch150coeff[ch_ix] = signal.lfilter(
+        #                 *self.notch150params, y_new, zi=self.notch150coeff[ch_ix]
+        #             )
+        #         # Save data copy:
+        #         # _, old_y_data = self.curves_data[ch_ix].getData()
+        #         # y_data = np.hstack([old_y_data[old_offset:],y_new.copy()])
+
+        #         # y_new = (y_new - y_new.mean()) / y_new.std() - 5 * ch_ix
+        #         this_y = np.hstack((old_y[old_offset:], y_new))
+        #         # this_y = ( this_y - this_y.mean() ) / this_y.std()
+        #         # print(this_y.shape)
+        #         # replace the old data
+
+        #         self.plots[ch_ix].curves[0].setData(this_x, this_y)
+        #         # self.plots[ch_ix].curves[0].setPen((0, 0, 0, 0))
 
 
 class ProcessorAndOutlet:
@@ -311,11 +368,10 @@ class ProcessorAndOutlet:
             to_process = to_process[:, -win_len:]
 
             logging.info(to_process.shape)
-            
+
             # to_process = filtfilt(b,a,data).copy()
         except (ValueError, RuntimeError):
             return
-
 
         # Preprocess data:
         if self.preprocessor is not None:
@@ -332,7 +388,6 @@ class ProcessorAndOutlet:
         out = model.forward(to_process)
         other_model.reset_state()
 
-        logging.info(out)
 
         # Send to stream:
         last_out = self.out_cat
@@ -344,6 +399,8 @@ class ProcessorAndOutlet:
         if last_out != self.out_cat and not finished_blanking:
             self.blanking = True
 
+        logging.info(f"{pylsl.local_clock()}; {self.out_cat}")
+
         # Update plots:
         if self.stim_is_on:
             score_curve, out_curve = self.score_curve_on, self.out_curve_on
@@ -352,30 +409,33 @@ class ProcessorAndOutlet:
             score_curve, out_curve = self.score_curve_off, self.out_curve_off
             other_score, other_out = self.score_curve_on, self.out_curve_on
         # Score Curves:
-        t_out, y_score = score_curve.getData()
-        old_offset = t_out.searchsorted(plot_time)
-        t_out, y_score = (
-            np.hstack((t_out[old_offset:], np.array(pylsl.local_clock()))),
-            np.hstack((y_score[old_offset:], np.array(out))),
-        )
-        score_curve.setData(t_out, y_score, connect="finite")
 
-        # Out Curve:
-        _, y_out_cat = out_curve.getData()
-        y_out_cat = np.hstack((y_out_cat[old_offset:], np.array((self.out_cat))))
-        out_curve.setData(t_out, y_out_cat, connect="finite")
-        out_curve.setPen((250, 0, 0))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            t_out, y_score = score_curve.getData()
+            old_offset = t_out.searchsorted(plot_time)
+            t_out, y_score = (
+                np.hstack((t_out[old_offset:], np.array(pylsl.local_clock()))),
+                np.hstack((y_score[old_offset:], np.array(out))),
+            )
+            score_curve.setData(t_out, y_score, connect="finite")
 
-        # Other Curves:
-        _, other_y = other_score.getData()
-        _, other_cat = other_out.getData()
+            # Out Curve:
+            _, y_out_cat = out_curve.getData()
+            y_out_cat = np.hstack((y_out_cat[old_offset:], np.array((self.out_cat))))
+            out_curve.setData(t_out, y_out_cat, connect="finite")
+            out_curve.setPen((250, 0, 0))
 
-        other_y = np.hstack((other_y[old_offset:], np.array(np.nan)))
-        other_score.setData(t_out, other_y, connect="finite")
+            # Other Curves:
+            _, other_y = other_score.getData()
+            _, other_cat = other_out.getData()
 
-        other_cat = np.hstack((other_cat[old_offset:], np.array(np.nan)))
-        other_out.setData(t_out, other_cat, connect="finite")
-        other_out.setPen((250, 0, 0))
+            other_y = np.hstack((other_y[old_offset:], np.array(np.nan)))
+            other_score.setData(t_out, other_y, connect="finite")
+
+            other_cat = np.hstack((other_cat[old_offset:], np.array(np.nan)))
+            other_out.setData(t_out, other_cat, connect="finite")
+            other_out.setPen((250, 0, 0))
 
         self.stim_is_on = bool(self.out_cat)
 
@@ -428,7 +488,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if hasattr(self, "timers"):
             self.timers[0].start(update_interval)
             self.timers[1].start(pull_interval)
-            self.timers[1].start(control_interval)
+            self.timers[2].start(plot_interval)
+            self.timers[3].start(control_interval)
 
         selected_stream = self.streamList.selectedItems()
         if not selected_stream:
@@ -468,19 +529,21 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.blankingChanged()
 
     def getModelOFF(self):
+        global win_len_sec
 
         self.fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "QFileDialog.getOpenFileName()", "", "PT Files (*.pt)"
+            self, "QFileDialog.getOpenFileName()", "", filter="*.cnn *.svm"
         )
         self.fname = Path(self.fname)
-        self.outlet.preprocessor, self.outlet.model_off = load_model(self.fname)
+        self.outlet.preprocessor, self.outlet.model_off, win_len_sec = load_model(self.fname,win_len_sec)
 
     def getModelON(self):
+        global win_len_sec
         self.fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "QFileDialog.getOpenFileName()", "", "PT Files (*.pt)"
+            self, "QFileDialog.getOpenFileName()", "", filter="*.cnn *.svm"
         )
         self.fname = Path(self.fname)
-        self.outlet.preprocessor, self.outlet.model_on = load_model(self.fname)
+        self.outlet.preprocessor, self.outlet.model_on, win_len_sec = load_model(self.fname,win_len_sec)
 
 
 def main():
@@ -512,12 +575,15 @@ def main():
 
     def update_in():
         # Read data from the inlet. Use a timeout of 0.0 so we don't block GUI interaction.
-        mintime = pylsl.local_clock() - plot_duration
+        #mintime = pylsl.local_clock() - plot_duration
         # call pull_and_plot for each inlet.
         # Special handling of inlet types (markers, continuous data) is done in
         # the different inlet classes.
 
-        inlet.pull_and_plot(mintime)
+        inlet.pull()
+
+    def plot_in():
+        inlet.plot()
 
     def update_out():
         # Read data from the inlet. Use a timeout of 0.0 so we don't block GUI interaction.
@@ -537,12 +603,16 @@ def main():
     pull_timer.timeout.connect(update_in)
     pull_timer.start(pull_interval)
 
+    plot_timer = QtCore.QTimer()
+    plot_timer.timeout.connect(plot_in)
+    plot_timer.start(plot_interval)
+
     # create a timer that will pull and add new data occasionally
     control_timer = QtCore.QTimer()
     control_timer.timeout.connect(update_out)
     control_timer.start(control_interval)
 
-    main.timers = [update_timer, pull_timer, control_timer]
+    main.timers = [update_timer, pull_timer, plot_timer, control_timer]
 
     sys.exit(app.exec_())
 
